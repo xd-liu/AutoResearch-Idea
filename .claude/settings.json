@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys,os,json,datetime; (sys.exit(0) if os.environ.get('SELF_IMPROVE_RUNNING') else None); d=json.load(sys.stdin); p=' '.join((d.get('prompt') or '').split()); base=d.get('cwd') or os.getcwd(); dirp=os.path.join(base,'.claude','self-improvement'); os.makedirs(dirp,exist_ok=True); open(os.path.join(dirp,'prompts.log'),'a').write(datetime.datetime.now().isoformat(timespec='seconds')+chr(9)+p+chr(10))\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'test -n \"$SELF_IMPROVE_RUNNING\" && exit 0; cd \"${CLAUDE_PROJECT_DIR:-.}\" 2>/dev/null || exit 0; test -s .claude/self-improvement/prompts.log || exit 0; command -v claude >/dev/null 2>&1 || exit 0; SELF_IMPROVE_RUNNING=1 nohup claude -p --model sonnet \"Use the self-improvement agent to append one concise entry to IMPROVEMENT_LOG.md for this session: read .claude/self-improvement/prompts.log for the prompts and run git diff --stat for changes; keep it terse.\" >/dev/null 2>&1 &'"
+          }
+        ]
+      }
+    ]
+  }
+}

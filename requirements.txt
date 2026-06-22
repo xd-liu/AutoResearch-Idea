@@ -1,0 +1,9 @@
+anthropic>=0.49.0
+requests>=2.31.0
+feedparser>=6.0.11
+pydantic>=2.6.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.1
+# PDF text extraction for the optional intro/conclusion enrichment. pypdf 5.x
+# drops Python 3.8, so pin to the 4.x line (this env is 3.8).
+pypdf>=4.0,<5

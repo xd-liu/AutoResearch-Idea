@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+outputs/
+runs/
+.DS_Store
+.claude/self-improvement/

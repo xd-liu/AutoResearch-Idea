@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration for the Python tools (search + digest).
+#
+# Orchestration is done by Claude Code via per-step subagents (.claude/agents/*),
+# whose models are set in their agent definitions. This file only configures the
+# two mechanical tools. Secrets (API keys) live in .env.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The digest tool is the only tool that calls a model. Sonnet keeps the cost of
+# analyzing ~50 papers low; effort is one of: low | medium | high | max.
+models:
+  digest: claude-sonnet-4-6
+effort:
+  digest: medium
+
+# Which paper sources the search tool queries. Remove any you don't want.
+# 'github' mines curated paper lists: "awesome-<topic>" repos AND conference
+# lists like "top-cvpr-2026-papers" (filtered to the topic, tagged with the
+# venue+year from the repo name). Set GITHUB_TOKEN in .env for usable rate limits.
+sources:
+  - arxiv
+  - semantic_scholar
+  - openalex
+  - github
+  - venue_pages
+
+# 'venue_pages' mines official accepted-paper listing pages (the authoritative,
+# complete lists), filtered to the topic and tagged with the venue+year. The
+# thecvf sites (CVPR/ICCV/WACV) are synthesized automatically for recent years;
+# add any other listing pages here.
+venue_pages:
+  # How many recent years of thecvf (CVPR/ICCV/WACV) listing pages to mine.
+  thecvf_years: 2
+  # Extra explicit accepted-paper listing pages (any conference / format).
+  urls:
+    - https://cvpr.thecvf.com/virtual/2026/papers.html
+
+retrieval:
+  # Results requested per query, per source. Kept high so enough recent papers
+  # survive the min_year filter below.
+  per_query_limit: 16
+  # After dedup + ranking, keep at most this many papers (~50 per the spec).
+  # Ranking is a weighted composite: relevance > recency > top-venue > citations
+  # (see sources/registry.py). Citations contribute but never dominate.
+  max_papers: 50
+  # Only keep papers from this year onward (0 = no filter). This is a fast-moving
+  # area, so restrict to roughly the last 2 years; recency is then weighted on top
+  # so the current year ranks highest.
+  min_year: 2024
+  # Fill in missing abstracts for the kept papers (e.g. venue-page / GitHub
+  # titles) by looking the title up in OpenAlex/arXiv, so the digester can use
+  # them. Set false to skip the extra lookups.
+  enrich_abstracts: true
+  # When a paper has a reachable PDF (arXiv preprint, openaccess.thecvf, *.pdf),
+  # download it and parse intro + conclusion into the paper record so the digester
+  # has more to work with. Papers without a PDF keep just the abstract. Set false
+  # to skip PDF downloads entirely.
+  parse_pdf: true
