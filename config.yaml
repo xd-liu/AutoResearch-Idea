@@ -53,6 +53,7 @@ retrieval:
   enrich_abstracts: true
   # When a paper has a reachable PDF (arXiv preprint, openaccess.thecvf, *.pdf),
   # download it and parse intro + conclusion into the paper record so the digester
-  # has more to work with. Papers without a PDF keep just the abstract. Set false
-  # to skip PDF downloads entirely.
-  parse_pdf: true
+  # has more to work with. Papers without a PDF keep just the abstract. Off by
+  # default (PDF downloads are slow); flip to true to enable. The capability lives
+  # in sources/pdf_extract.py.
+  parse_pdf: false

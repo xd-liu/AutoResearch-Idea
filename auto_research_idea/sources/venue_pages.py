@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime
 
 from ..models import Paper
@@ -154,14 +155,21 @@ class VenuePagesSource(PaperSource):
         return cands
 
     def _abstract_for(self, paper_url: str) -> str:
-        """Fetch a paper's detail page and extract its abstract (cached)."""
-        if paper_url in self._abstract_cache:
+        """Fetch a paper's detail page and extract its abstract (cached).
+
+        A short delay between detail fetches keeps a burst of them from tripping
+        the venue site's rate limiter (which silently returns empty abstracts).
+        Empty results are NOT cached, so a transient failure can be retried.
+        """
+        if self._abstract_cache.get(paper_url):
             return self._abstract_cache[paper_url]
         abstract = ""
-        resp = get_with_retry(paper_url, params={}, headers=self._headers, max_attempts=2)
+        resp = get_with_retry(paper_url, params={}, headers=self._headers, max_attempts=3)
         if resp is not None:
             abstract = _extract_abstract(resp.text)
-        self._abstract_cache[paper_url] = abstract
+        if abstract:
+            self._abstract_cache[paper_url] = abstract
+        time.sleep(0.34)  # be polite to the venue site
         return abstract
 
     def search(self, query: str, limit: int) -> list[Paper]:
