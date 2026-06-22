@@ -2,7 +2,7 @@
 
 > Turn a one-line research **meta-idea** into a ranked list of **50–100 concrete, novel paper ideas** — each cross-bred from real, freshly-retrieved literature, scored for novelty, feasibility, and impact.
 
-You give it a rough thought. It brainstorms angles, pulls ~50 related papers, distills each into reusable "genes," cross-breeds those genes into fresh ideas (杂交衍生 / *hybridization*), then scores and ranks them — all while a **live dashboard** shows the work happening step by step.
+You give it a rough thought. It brainstorms angles, pulls ~50 related papers, distills each into reusable "genes," cross-breeds those genes into fresh ideas (*hybridization*), then scores and ranks them — all while a **live dashboard** shows the work happening step by step.
 
 It runs on **Claude Code** (your Pro/Max subscription — no API key needed for the default pipeline).
 
