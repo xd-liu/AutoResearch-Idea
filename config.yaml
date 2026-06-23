@@ -23,6 +23,9 @@ sources:
   - openalex
   - github
   - venue_pages
+  - openreview
+  - acl_anthology
+  - ecva
 
 # 'venue_pages' mines official accepted-paper listing pages (the authoritative,
 # complete lists), filtered to the topic and tagged with the venue+year. The
@@ -50,12 +53,39 @@ venue_pages:
       cadence: annual
       listing: "https://wacv.thecvf.com/virtual/{year}/papers.html"
       pdf: "citation_pdf_url meta on each poster page, else the arXiv link"
-  # Known future extension points (not auto-mined yet — their pages need a
-  # dedicated parser): NeurIPS/ICML/ICLR via OpenReview (api2.openreview.net,
-  # filter invitation=*/Submission; content.pdf has the PDF), ACL/EMNLP/NAACL via
-  # the ACL Anthology (aclanthology.org/events/<venue>-<year>/; PDFs at <id>.pdf).
+  # CV venues additionally resolve PDFs from the CVF openaccess index
+  # (openaccess.thecvf.com/<V><Y>?day=all), which hosts every paper's PDF even
+  # when the virtual poster page doesn't link it. Handled automatically.
+  # Other top venues are covered by their own drivers: ICLR/NeurIPS/ICML/CoRL via
+  # the `openreview` source below. ACL/EMNLP/NAACL (ACL Anthology) and ECCV (ECVA)
+  # are documented extension points needing a dedicated parser.
   # Extra explicit accepted-paper listing pages (any conference / format).
   urls: []
+
+# 'openreview' covers the top ML venues that publish on OpenReview — ICLR,
+# NeurIPS, ICML, CoRL — including the very latest (e.g. ICLR 2026). It queries the
+# accepted papers by venueid and returns title + abstract + direct PDF.
+openreview:
+  # How many recent years to mine per venue (current year first).
+  years: 2
+  # venueid templates ({year} is filled in). Accepted papers carry these.
+  venues:
+    - {name: ICLR, id: "ICLR.cc/{year}/Conference"}
+    - {name: NeurIPS, id: "NeurIPS.cc/{year}/Conference"}
+    - {name: ICML, id: "ICML.cc/{year}/Conference"}
+    - {name: CoRL, id: "robot-learning.org/CoRL/{year}/Conference"}
+
+# 'acl_anthology' covers the top NLP venues (ACL/EMNLP/NAACL + Findings) from the
+# ACL Anthology — each event page lists every paper with an inline abstract and a
+# direct open-access PDF.
+acl_anthology:
+  years: 2
+  venues: [acl, emnlp, naacl]
+
+# 'ecva' covers ECCV (open-access PDFs on ecva.net). ECCV is biennial; the source
+# keeps editions from the last `retrieval.ecva_years` years (so 2024 stays in).
+# NOTE: IROS/ICRA (robotics) are on IEEE Xplore — PDFs are paywalled, so they are
+# covered for metadata/abstracts via OpenAlex + Semantic Scholar, not a driver here.
 
 retrieval:
   # Results requested per query, per source. Kept high so enough recent papers

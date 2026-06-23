@@ -38,9 +38,27 @@ Each idea object:
 }
 ```
 
-Strong ideas: combine TWO OR MORE different papers' mechanisms/techniques, OR
-graft a `transferable_concept` onto the problem in a new way, OR directly attack a
-`limitation` from the gene library. Set `parent_source_ids` to the real
-`source_id`s you drew from (use `"meta-idea"` for problem-driven ideas). Avoid
-ideas that merely restate a single existing paper. Write valid JSON only, then
-reply with a one-line summary (e.g. "18 ideas written to ideas_raw_2.json").
+Strong ideas integrate **TWO OR MORE distinct retrieved mechanisms** so the
+result is something neither parent proposed. Set `parent_source_ids` to the real
+`source_id`s you drew from (use `"meta-idea"` only IN ADDITION to ≥2 real genes,
+never as a substitute for a second mechanism).
+
+Avoid these failure modes (they dominated the last run's critiques):
+- **Single-parent sign-flips.** Taking one subtractive/pruning paper and
+  "inverting" it to additive (or one paper + the meta-idea) is NOT a new idea —
+  it inherits one mechanism with a thin twist. Require a genuine second mechanism.
+- **Over-stacking without integration.** Bolting 3-4 components together without
+  resolving HOW they interact (e.g. how a textual pool actually drives
+  fine-grained visual spending) is not a contribution. State the integration.
+- **Assuming cross-regime transfer.** Don't assume a parent's mechanism (validated
+  on, say, static images or full-resolution tokens) transfers to video / coarse
+  views / streaming without saying why. Confront the make-or-break feasibility
+  issue (e.g. injecting tokens at non-zero layers breaks positional/KV alignment).
+- **Inheriting a parent's limitation unremedied.** If a parent gene lists a
+  failure mode your idea would reproduce, either fix it or pick a different parent.
+- **Within your lens, diversify.** Don't emit several near-isomorphic variants of
+  one trigger; vary the actual mechanism.
+
+In `novelty`, name the concrete delta vs EACH parent. In `risks`, name the central
+feasibility tension the idea must resolve. Write valid JSON only, then reply with a
+one-line summary (e.g. "18 ideas written to ideas_raw_2.json").

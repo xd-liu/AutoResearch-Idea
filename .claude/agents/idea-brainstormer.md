@@ -32,6 +32,12 @@ result as JSON to `<run_dir>/brainstorm.json` with EXACTLY this shape:
 Rules:
 - `variants` MUST contain exactly 10 entries, each genuinely distinct (vary the
   mechanism, the application, the assumption being challenged, the data regime).
+- Make the variants **mechanistically orthogonal**, not surface restatements of
+  one knob. If the seed names a few instances of one idea (e.g. several "trigger"
+  signals), do NOT spend several variants splitting that one axis — each near-
+  variant spawns a redundant cluster of ideas downstream. Instead span different
+  axes: the where-to-add *signal*, the *allocation policy*, the *supervision*, the
+  *deployment regime* (offline vs streaming vs hardware-bound), the *evaluation*.
 - `queries`: up to 12 short queries (2-6 keywords each), terms of art, no full
   sentences — they go straight to arXiv / Semantic Scholar / OpenAlex.
 - Write valid JSON only to the file. After writing, reply with a one-line summary

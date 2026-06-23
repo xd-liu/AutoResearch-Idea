@@ -25,6 +25,8 @@ class Config:
     sources: List[str] = field(default_factory=lambda: ["arxiv"])
     retrieval: Dict[str, Any] = field(default_factory=dict)
     venue_pages: Dict[str, Any] = field(default_factory=dict)
+    openreview: Dict[str, Any] = field(default_factory=dict)
+    acl_anthology: Dict[str, Any] = field(default_factory=dict)
 
     # Secrets / environment
     anthropic_api_key: str = ""
@@ -55,6 +57,8 @@ def load_config(path=None) -> Config:
         sources=raw.get("sources", ["arxiv"]),
         retrieval=raw.get("retrieval", {}),
         venue_pages=raw.get("venue_pages", {}),
+        openreview=raw.get("openreview", {}),
+        acl_anthology=raw.get("acl_anthology", {}),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip(),
         semantic_scholar_api_key=os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "").strip(),
         github_token=os.environ.get("GITHUB_TOKEN", "").strip(),

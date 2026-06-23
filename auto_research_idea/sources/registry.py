@@ -9,10 +9,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from ..models import Paper
+from .acl_anthology import ACLAnthologySource
 from .arxiv import ArxivSource
 from .base import PaperSource
+from .ecva import ECVASource
 from .github_awesome import GitHubAwesomeSource
 from .openalex import OpenAlexSource
+from .openreview import OpenReviewSource
 from .pdf_extract import fetch_sections, pdf_url_for
 from .semantic_scholar import SemanticScholarSource
 from .venue_pages import VenuePagesSource
@@ -105,6 +108,25 @@ def build_sources(cfg) -> list[PaperSource]:
                 recent_years=vp.get("thecvf_years", 2),
                 contact_email=cfg.contact_email,
                 registry=vp.get("registry", []),
+            ))
+        elif name == "openreview":
+            orv = cfg.openreview or {}
+            built.append(OpenReviewSource(
+                venues=orv.get("venues"),
+                recent_years=orv.get("years", 2),
+                contact_email=cfg.contact_email,
+            ))
+        elif name == "acl_anthology":
+            ant = cfg.acl_anthology or {}
+            built.append(ACLAnthologySource(
+                venues=ant.get("venues"),
+                recent_years=ant.get("years", 2),
+                contact_email=cfg.contact_email,
+            ))
+        elif name == "ecva":
+            built.append(ECVASource(
+                recent_years=(cfg.retrieval or {}).get("ecva_years", 2),
+                contact_email=cfg.contact_email,
             ))
         else:
             logger.warning("Unknown source %r in config; skipping.", name)

@@ -14,11 +14,22 @@ The orchestrator gives you a **run directory**. Steps:
    or the pooled count is far below the expected 50-100, do NOT silently rank a
    tiny set — report the shortfall to the orchestrator (it usually means the
    hybridizers collided on one output filename or failed).
-2. Drop near-duplicates (same core idea under different titles), keeping the
-   best-expressed version.
+2. **Aggressively consolidate, don't just label.** Several parallel hybridizers
+   converge on the same fusion, so the pool contains near-duplicate *families*
+   (e.g. audio-gate variants, "invert-the-pruner" twins, draft-verify variants,
+   RL-controller variants). Collapse each family to ONE lead entry (the
+   best-expressed version), folding the rest in as noted ablations — do NOT keep
+   an entry you would describe as a "near-duplicate of #X" or as a component that
+   only makes sense paired with another idea. If your own `rationale` calls
+   something a duplicate, you must merge it, not rank it separately.
 3. Score each remaining idea 1-10 on **novelty** (new vs. existing literature),
    **feasibility** (executable with current methods/resources), and **impact**
-   (significance if it works). Be honest — most ideas are not 9s.
+   (significance if it works). Be honest — most ideas are not 9s. **Discount
+   novelty AND impact by overlap with the retrieved literature**: if an idea is
+   close to a real paper in `papers.json`/`genes*.json` (even one not cited as a
+   parent), it is not as novel or impactful as it looks — score it down and note
+   the overlap. A benchmark/eval-protocol idea's impact is gated by adoption, so
+   don't auto-rank it above concrete methods.
 4. Rank by total score (ties broken by novelty, then impact). Assign `rank`
    starting at 1.
 5. Write the ranked array to `<run_dir>/ideas.json`.

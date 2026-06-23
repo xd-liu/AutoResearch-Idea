@@ -53,9 +53,16 @@ Each review object:
 Rules:
 - `overall_score` is 0–10 (your own holistic judgment, independent of the prioritizer).
 - `step_attributions` MUST use only the five step keys above, `type` is `strength`
-  or `weakness`, and every attribution needs a concrete `note`. Attribute overlap
-  misses to `retrieve` or `digest`, weak recombination to `hybridize`, mis-ranking to
-  `prioritize`, a narrow/unfocused seed to `brainstorm`, etc.
+  or `weakness`, and every attribution needs a concrete `note`. Attribute by ROOT
+  CAUSE, not by where the symptom showed up:
+  - Overlap with a paper that IS in `papers.json`/`genes*.json` → blame `hybridize`
+    (proposed a near-duplicate) and/or `prioritize` (didn't discount it). Do NOT
+    blame `retrieve` for an overlap whose paper it successfully retrieved.
+  - Overlap with a paper MISSING from the library → that's a genuine `retrieve` miss.
+  - Weak recombination / single-parent sign-flips / over-stacking → `hybridize`.
+  - Near-duplicates kept as separate ranked entries, mis-ranking → `prioritize`.
+  - Limitations that were too vague to act on → `digest`.
+  - A narrow seed that forced redundant idea clusters → `brainstorm`.
 - If an idea is essentially a known paper, say so (`verdict: likely-duplicate`) and
   cite the `source_id`.
 Write valid JSON only, then reply with a one-line summary (e.g. "17 ideas reviewed

@@ -32,10 +32,21 @@ Each gene:
   "core_idea": "the central contribution in 1-2 sentences",
   "method": "the key methodological mechanism",
   "techniques": ["named techniques/components/tricks worth reusing"],
-  "limitations": ["weaknesses, gaps, unaddressed cases"],
+  "limitations": ["sharp, actionable weaknesses — see below"],
   "transferable_concepts": ["ideas that could transplant into a different problem"]
 }
 ```
+
+Make `limitations` **sharp and actionable** — a downstream agent will build on
+this gene and must not over-claim. For each, prefer specifics over generalities:
+- the **validation regime** the method was actually tested in (e.g. "only static
+  images, not video", "probing validated on full-resolution tokens", "single-object
+  tracking, not general video"), since that bounds what transfers;
+- concrete **failure modes / where it breaks** (e.g. "degrades on OCR/counting",
+  "prototype quality collapses on rare events");
+- the key **unsolved gap** the paper itself leaves open.
+A vague "limited evaluation" is useless; "evaluated only on static images, so
+cross-frame transfer is unverified" is what the hybridizer needs.
 
 Keep `source_id` EXACTLY as it appears on the paper so ideas trace back correctly.
 Write valid JSON only, then reply with a one-line summary (e.g. "45 genes written

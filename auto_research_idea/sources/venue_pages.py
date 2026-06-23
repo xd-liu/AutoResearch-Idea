@@ -15,6 +15,7 @@ Like every source, this never raises — it returns [] on any network/parse erro
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 import time
@@ -66,28 +67,64 @@ _PDF_HREF_RES = [
 ]
 
 
-def _strip_tags(html: str) -> str:
-    return re.sub(r"\s+", " ", _TAG_RE.sub(" ", html)).strip()
+def _strip_tags(markup: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(_TAG_RE.sub(" ", markup))).strip()
 
 
-def _extract_pdf_url(html: str) -> str:
-    m = _PDF_META_RE.search(html)
+def _norm_key(title: str) -> str:
+    """Normalized title key for matching across sites (entity-decoded, alnum)."""
+    return "".join(c for c in html.unescape(title or "").lower() if c.isalnum())
+
+
+def _extract_pdf_url(markup: str) -> str:
+    m = _PDF_META_RE.search(markup)
     if m:
         return m.group(1).strip()
     for rx in _PDF_HREF_RES:
-        m = rx.search(html)
+        m = rx.search(markup)
         if m:
             return m.group(1).strip()
     return ""
 
 
-def _extract_abstract(html: str) -> str:
+# The CVF openaccess site hosts every paper's PDF on a single per-conference index
+# (e.g. https://openaccess.thecvf.com/CVPR2026?day=all) — the authoritative PDF
+# source for thecvf venues, even when the virtual poster page doesn't link it.
+_OA_BASE = "https://openaccess.thecvf.com"
+_OA_PTITLE_RE = re.compile(
+    r'class="ptitle">(?:<br>)?<a href="(/content/[^"]+?/html/[^"]+?\.html)">(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _openaccess_url(venue_str: str) -> str:
+    """'CVPR 2026' -> the openaccess all-papers index URL, or '' if not a CVF venue."""
+    code = (venue_str or "").replace(" ", "")
+    if not re.match(r"(CVPR|ICCV|ECCV|WACV)\d{4}$", code, re.IGNORECASE):
+        return ""
+    return f"{_OA_BASE}/{code}?day=all"
+
+
+def _parse_openaccess_index(markup: str) -> dict:
+    """Map normalized title -> direct PDF url from a CVF openaccess index page."""
+    out = {}
+    for m in _OA_PTITLE_RE.finditer(markup):
+        href = m.group(1)
+        key = _norm_key(_strip_tags(m.group(2)))
+        if not key:
+            continue
+        pdf = _OA_BASE + href.replace("/html/", "/papers/")[:-5] + ".pdf"
+        out[key] = pdf
+    return out
+
+
+def _extract_abstract(markup: str) -> str:
     """Pull the abstract text out of a paper detail page."""
-    m = _META_ABSTRACT_RE.search(html)
+    m = _META_ABSTRACT_RE.search(markup)
     if m and len(m.group(1)) > 60:
         return _strip_tags(m.group(1))
     best = ""
-    for m in _ABSTRACT_BLOCK_RE.finditer(html):
+    for m in _ABSTRACT_BLOCK_RE.finditer(markup):
         text = _strip_tags(m.group(2))
         if len(text) > len(best):
             best = text
@@ -130,7 +167,32 @@ class VenuePagesSource(PaperSource):
         self._page_cache: dict = {}
         # Cache per-paper detail (abstract + pdf_url) across queries.
         self._abstract_cache: dict = {}
+        # Cache the openaccess title->pdf index per venue (e.g. "CVPR 2026").
+        self._pdf_index_cache: dict = {}
         self._urls = None
+
+    def _pdf_index(self, venue_str: str) -> dict:
+        """Title->PDF map from the CVF openaccess index for a venue (cached).
+
+        The index page is large, so allow a generous timeout; a non-CVF venue
+        (or transient failure) yields {} and is NOT cached, so it can be retried.
+        """
+        cached = self._pdf_index_cache.get(venue_str)
+        if cached:
+            return cached
+        url = _openaccess_url(venue_str)
+        if not url:
+            return {}
+        mapping: dict = {}
+        # NOTE: openaccess.thecvf.com returns 406 if sent an `Accept: text/html`
+        # header, so fetch the (large) index with only a User-Agent.
+        oa_headers = {"User-Agent": self._headers.get("User-Agent", "auto-research-idea")}
+        resp = get_with_retry(url, params={}, headers=oa_headers, timeout=60, max_attempts=3)
+        if resp is not None:
+            mapping = _parse_openaccess_index(resp.text)
+        if mapping:
+            self._pdf_index_cache[venue_str] = mapping
+        return mapping
 
     def _listing_urls(self) -> list:
         if self._urls is not None:
@@ -228,11 +290,15 @@ class VenuePagesSource(PaperSource):
                     break
                 if kw_set and sum(1 for k in kw_set if k in title.lower()) < need:
                     continue
-                key = "".join(c for c in title.lower() if c.isalnum())
+                key = _norm_key(title)
                 if key in seen:
                     continue
                 seen.add(key)
                 detail = self._detail_for(paper_url)
+                # Resolve a PDF: prefer one linked on the detail page, else the
+                # authoritative CVF openaccess index (covers papers whose virtual
+                # poster page links no PDF, e.g. all of CVPR 2026).
+                pdf_url = detail["pdf_url"] or self._pdf_index(venue or "").get(key, "")
                 papers.append(
                     Paper(
                         source=self.name,
@@ -241,7 +307,7 @@ class VenuePagesSource(PaperSource):
                         abstract=detail["abstract"],
                         url=paper_url,
                         landing_url=paper_url,
-                        pdf_url=detail["pdf_url"],
+                        pdf_url=pdf_url,
                         venue=venue or "",
                         year=year,
                     )

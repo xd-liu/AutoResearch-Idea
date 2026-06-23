@@ -86,6 +86,29 @@ paper found by several sources gets enriched. The `github` source mines
 `awesome-<topic>` READMEs and emits `arxiv:<id>` source_ids + bold-extracted
 titles specifically so they merge/enrich with the arXiv/OpenAlex results.
 
+**Top-venue coverage = a registry + per-family drivers** (no single API spans
+all venues). Each retrieved paper stores `landing_url` (official page) + `pdf_url`:
+- `venue_pages` — CV venues (CVPR/ICCV/WACV): the thecvf *virtual* site for
+  abstracts + the CVF *openaccess* index (`openaccess.thecvf.com/<V><Y>?day=all`)
+  for a title→PDF map. (openaccess 406s on an `Accept: text/html` header — fetch
+  it with only a User-Agent.) Registry-driven via `config.yaml venue_pages.registry`.
+- `openreview` — ML venues (ICLR/NeurIPS/ICML/CoRL): queries accepted papers by
+  `content.venueid`, returning title+abstract+direct PDF (covers e.g. ICLR 2026,
+  which arXiv/OpenAlex miss). Config: `openreview.venues`.
+- `acl_anthology` — NLP venues (ACL/EMNLP/NAACL + Findings): parses each event
+  page (`aclanthology.org/events/<venue>-<year>/`) for title + inline abstract +
+  direct PDF. Note: hrefs are unquoted; titles are split by `acl-fixed-case`
+  spans (drop those spans without inserting a space).
+- `ecva` — ECCV (open-access PDFs on `ecva.net/papers.php`). ECCV is biennial, so
+  it keeps editions back to `retrieval.ecva_years` (don't filter to current_year-1,
+  which is never an ECCV year). Abstracts are backfilled by enrichment.
+- IROS/ICRA (robotics) are IEEE-Xplore-paywalled — no open-access PDF driver is
+  possible; they come through OpenAlex/Semantic-Scholar (metadata/abstracts) and
+  arXiv preprints (PDF when one exists).
+- Ranking (`registry._rank`/`_score`) weights relevance > recency > top-venue >
+  citations; `min_year` + heavy recency weight favor the current year. PDF
+  intro/conclusion extraction (`pdf_extract.py`) is gated by `retrieval.parse_pdf`.
+
 ## Commands
 
 ```bash
