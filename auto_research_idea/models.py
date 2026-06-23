@@ -28,6 +28,10 @@ class Paper(BaseModel):
     url: str = ""
     venue: str = ""
     citation_count: Optional[int] = None
+    # Reusable provenance for re-fetching this paper later: the official landing
+    # page (e.g. the CVF poster page / OpenReview forum) and a direct PDF link.
+    landing_url: str = ""
+    pdf_url: str = ""
     # Optional richer content parsed from the paper PDF when one is available
     # (see sources/pdf_extract.py). Empty when no PDF could be fetched/parsed.
     intro: str = ""
@@ -35,7 +39,8 @@ class Paper(BaseModel):
 
     # Tolerate explicit JSON null on string/list fields (hand-written or
     # third-party papers.json) instead of failing the whole batch.
-    @field_validator("source", "source_id", "title", "abstract", "url", "venue", "intro", "conclusion", mode="before")
+    @field_validator("source", "source_id", "title", "abstract", "url", "venue",
+                     "landing_url", "pdf_url", "intro", "conclusion", mode="before")
     @classmethod
     def _str_none_to_empty(cls, v):
         return "" if v is None else v

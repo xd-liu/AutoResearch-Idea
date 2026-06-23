@@ -29,20 +29,42 @@ sources:
 # thecvf sites (CVPR/ICCV/WACV) are synthesized automatically for recent years;
 # add any other listing pages here.
 venue_pages:
-  # How many recent years of thecvf (CVPR/ICCV/WACV) listing pages to mine.
-  thecvf_years: 2
+  # How many recent years of listing pages to mine (applies to the registry below).
+  thecvf_years: 3
+  # ── Venue registry ──────────────────────────────────────────────────────────
+  # Reusable record of where each top venue publishes its official accepted-paper
+  # list and how to reach the PDFs. Each retrieved paper stores `landing_url` (the
+  # official page) and `pdf_url`. `listing` is a URL template with {year};
+  # `cadence` is annual | odd | even (so we don't fetch, e.g., even-year ICCV).
+  # Add a venue here (no code change needed) to extend coverage.
+  registry:
+    - venue: CVPR
+      cadence: annual
+      listing: "https://cvpr.thecvf.com/virtual/{year}/papers.html"
+      pdf: "citation_pdf_url meta on each poster page, else the arXiv link"
+    - venue: ICCV
+      cadence: odd
+      listing: "https://iccv.thecvf.com/virtual/{year}/papers.html"
+      pdf: "citation_pdf_url meta on each poster page, else the arXiv link"
+    - venue: WACV
+      cadence: annual
+      listing: "https://wacv.thecvf.com/virtual/{year}/papers.html"
+      pdf: "citation_pdf_url meta on each poster page, else the arXiv link"
+  # Known future extension points (not auto-mined yet — their pages need a
+  # dedicated parser): NeurIPS/ICML/ICLR via OpenReview (api2.openreview.net,
+  # filter invitation=*/Submission; content.pdf has the PDF), ACL/EMNLP/NAACL via
+  # the ACL Anthology (aclanthology.org/events/<venue>-<year>/; PDFs at <id>.pdf).
   # Extra explicit accepted-paper listing pages (any conference / format).
-  urls:
-    - https://cvpr.thecvf.com/virtual/2026/papers.html
+  urls: []
 
 retrieval:
   # Results requested per query, per source. Kept high so enough recent papers
   # survive the min_year filter below.
-  per_query_limit: 16
-  # After dedup + ranking, keep at most this many papers (~50 per the spec).
+  per_query_limit: 24
+  # After dedup + ranking, keep at most this many papers.
   # Ranking is a weighted composite: relevance > recency > top-venue > citations
   # (see sources/registry.py). Citations contribute but never dominate.
-  max_papers: 50
+  max_papers: 100
   # Only keep papers from this year onward (0 = no filter). This is a fast-moving
   # area, so restrict to roughly the last 2 years; recency is then weighted on top
   # so the current year ranks highest.
@@ -56,4 +78,4 @@ retrieval:
   # has more to work with. Papers without a PDF keep just the abstract. Off by
   # default (PDF downloads are slow); flip to true to enable. The capability lives
   # in sources/pdf_extract.py.
-  parse_pdf: false
+  parse_pdf: true

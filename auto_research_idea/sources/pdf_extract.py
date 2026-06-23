@@ -38,6 +38,8 @@ _NEXT_HEADING_RE = re.compile(
 
 def pdf_url_for(paper) -> str:
     """Derive a downloadable PDF URL for a paper, or "" if none is apparent."""
+    if getattr(paper, "pdf_url", ""):
+        return paper.pdf_url  # already captured (e.g. from the venue detail page)
     sid = paper.source_id or ""
     url = paper.url or ""
     m = _ARXIV_ID_RE.search(sid) or _ARXIV_ABS_RE.search(url)

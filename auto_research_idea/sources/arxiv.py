@@ -44,6 +44,8 @@ class ArxivSource(PaperSource):
                     authors=[a.get("name", "") for a in entry.get("authors", [])],
                     year=year,
                     url=entry.get("link", ""),
+                    landing_url=f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else "",
+                    pdf_url=f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else "",
                     venue="arXiv",
                 )
             )
@@ -77,7 +79,10 @@ class ArxivSource(PaperSource):
             "sortBy": "relevance",
             "sortOrder": "descending",
         }
-        resp = get_with_retry(_API, params=params, headers=self._headers)
+        # Fewer attempts than a primary search: this is a best-effort enrichment
+        # lookup, often run in bulk, so we don't want to spend ~14s of backoff per
+        # title once arXiv starts rate-limiting.
+        resp = get_with_retry(_API, params=params, headers=self._headers, max_attempts=2)
         if resp is None:
             return []
         papers = self._parse_feed(resp.text)

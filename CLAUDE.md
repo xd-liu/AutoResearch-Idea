@@ -5,10 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A research-idea generation system: a seed meta-idea → 10 brainstorm variants →
-~50 retrieved papers → digested "genes" → 50–100 cross-bred (杂交衍生) ideas →
-scored & ranked. It is **skill-orchestrated**: Claude Code runs the
-`research-ideas` skill, which delegates each step to a subagent; a read-only web
-dashboard visualizes progress. See `README.md` for the user-facing walkthrough.
+~100 retrieved papers → digested "genes" → 50–100 cross-bred (杂交衍生) ideas →
+scored & ranked → adversarially reviewed (with per-step credit assignment). It is
+**skill-orchestrated**: Claude Code runs the `research-ideas` skill, which
+delegates each step to a subagent; a live web dashboard visualizes progress and
+lets a human annotate ideas (notes / score / rank). See `README.md` for the
+user-facing walkthrough.
 
 ## Two constraints that will bite you if ignored
 
@@ -44,6 +46,7 @@ The pipeline, orchestrated by `.claude/skills/research-ideas/SKILL.md`:
 ```
 idea-brainstormer(opus) → paper-retriever(sonnet) → paper-digester(sonnet)
    → idea-hybridizer(opus, ×N parallel) → idea-prioritizer(opus)
+   → idea-critic(opus, ×N parallel)
 ```
 
 Each step is a subagent in `.claude/agents/*.md` — the unit you optimize
@@ -63,7 +66,10 @@ anything:
 | `papers.json` | search tool (atomic) | digester, dashboard |
 | `genes.json` / `genes_<k>.json` | digester | hybridizer, dashboard |
 | `ideas_raw_<k>.json` | each parallel hybridizer (distinct filename!) | prioritizer, dashboard |
-| `ideas.json` | idea-prioritizer | dashboard, final report |
+| `ideas.json` | idea-prioritizer | dashboard, critic, final report |
+| `reviews_<k>.json` | each parallel idea-critic (distinct filename!) | `credit.py`, dashboard |
+| `credit_summary.json` | `credit.py` (aggregates reviews) | dashboard, final report |
+| `annotations.json` | dashboard (human notes/score/rank; non-destructive) | dashboard |
 
 `runstate.py` defines `STEPS` and the `status.json` schema; `dashboard.py`
 `_gather_run` reads these shapes. Artifacts are LLM-written, so readers must
@@ -104,9 +110,10 @@ cp .env.example .env            # real keys go ONLY in .env
 .venv/bin/python -m auto_research_idea.runstate pending                       # newest queued run dir
 ```
 
-Tuning lives in `config.yaml` (sources, `retrieval.max_papers` ≈ 50, the digest
-model/effort) and in the skill/agent files (variant count, number of parallel
-hybridizers → idea count).
+Tuning lives in `config.yaml` (sources incl. the `venue_pages` registry,
+`retrieval.max_papers` ≈ 100, `retrieval.enrich_abstracts` / `parse_pdf`, the
+digest model/effort) and in the skill/agent files (variant count, number of
+parallel hybridizers → idea count, number of critics).
 
 ## Verifying changes
 

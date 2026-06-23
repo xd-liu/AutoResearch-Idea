@@ -104,6 +104,7 @@ def build_sources(cfg) -> list[PaperSource]:
                 extra_urls=vp.get("urls", []),
                 recent_years=vp.get("thecvf_years", 2),
                 contact_email=cfg.contact_email,
+                registry=vp.get("registry", []),
             ))
         else:
             logger.warning("Unknown source %r in config; skipping.", name)
@@ -123,6 +124,10 @@ def _combine(a: Paper, b: Paper) -> Paper:
     base.year = base.year or other.year
     base.venue = base.venue or other.venue
     base.url = base.url or other.url
+    base.landing_url = base.landing_url or other.landing_url
+    base.pdf_url = base.pdf_url or other.pdf_url
+    base.intro = base.intro or other.intro
+    base.conclusion = base.conclusion or other.conclusion
     if not base.authors:
         base.authors = other.authors
     cites = [c for c in (a.citation_count, b.citation_count) if c is not None]
@@ -204,11 +209,14 @@ def _enrich_abstracts(papers: list[Paper], contact_email: str = "", max_lookups:
             p.url = match.url
 
 
-def _enrich_pdf_sections(papers: list[Paper], max_pdfs: int = 60) -> None:
+def _enrich_pdf_sections(papers: list[Paper], contact_email: str = "", max_pdfs: int = 80) -> None:
     """For papers with a reachable PDF, fill in intro/conclusion (best effort).
 
-    Bounded by max_pdfs; mutates in place; never raises (each download is guarded
-    by the soft-failing HTTP + parse helpers)."""
+    A paper's PDF may be directly derivable (arXiv id / *.pdf / openaccess), or —
+    for venue-page papers that only have a landing page — found by looking the
+    title up on arXiv to locate a preprint. Bounded by max_pdfs; mutates in place;
+    never raises (each download is guarded by the soft-failing helpers)."""
+    ax = ArxivSource(contact_email=contact_email)
     count = 0
     for p in papers:
         if count >= max_pdfs:
@@ -216,6 +224,18 @@ def _enrich_pdf_sections(papers: list[Paper], max_pdfs: int = 60) -> None:
         if p.intro or p.conclusion:
             continue
         url = pdf_url_for(p)
+        if not url:
+            # No direct PDF (e.g. a CVPR poster page) — try to find an arXiv
+            # preprint of the same paper by title and use its PDF.
+            try:
+                for cand in ax.lookup_title(p.title):
+                    if cand.pdf_url and _title_match(p.title, cand.title):
+                        url = cand.pdf_url
+                        if not p.pdf_url:
+                            p.pdf_url = cand.pdf_url
+                        break
+            except Exception as e:  # defensive: lookups must not crash the run
+                logger.warning("arXiv PDF lookup failed for %r: %s", p.title[:60], e)
         if not url:
             continue
         count += 1
@@ -303,5 +323,5 @@ def search_all(
         _enrich_abstracts(top, contact_email=contact_email)
     if parse_pdf:
         # Add intro/conclusion from each paper's PDF where one is reachable.
-        _enrich_pdf_sections(top)
+        _enrich_pdf_sections(top, contact_email=contact_email)
     return top

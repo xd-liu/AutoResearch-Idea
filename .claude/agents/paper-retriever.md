@@ -1,6 +1,6 @@
 ---
 name: paper-retriever
-description: Step 2 of the research-idea pipeline. Runs the search tool to retrieve, dedupe, and rank ~50 related papers from the brainstorm queries. Spawned by the research-ideas orchestrator. Cheap model — it just drives a tool.
+description: Step 2 of the research-idea pipeline. Runs the search tool to retrieve, dedupe, and rank ~100 related papers from the brainstorm queries. Spawned by the research-ideas orchestrator. Cheap model — it just drives a tool.
 tools: Bash, Read, Write
 model: sonnet
 ---

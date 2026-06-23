@@ -1,12 +1,15 @@
-"""Read-only live dashboard for the research-idea pipeline.
+"""Live dashboard for the research-idea pipeline.
 
 Serves a web page that polls each run's artifacts in `runs/<id>/` and shows live
 progress: pipeline step states, the 10 brainstorm variants, the retrieved paper
-list, the hybridize key insights, and the final ranked ideas with priority.
+list, the hybridize key insights, the final ranked ideas with priority, the
+adversarial reviews, and the per-step credit summary.
 
-It NEVER runs the pipeline — Claude Code does that. The page's input box only
-*queues* a run (writes request.json + a 'queued' status.json); you then run the
-`research-ideas` skill in Claude Code, which picks the queued run up.
+It NEVER runs the pipeline — Claude Code does that. The only things the page
+writes are: *queueing* a run (request.json + a 'queued' status.json) and saving
+human **annotations** (notes / score / rank overrides) to a non-destructive
+`annotations.json` — ideas.json itself is never overwritten. Run the
+`research-ideas` skill in Claude Code to pick a queued run up.
 
     python -m auto_research_idea.dashboard [--port 8000] [--runs-dir runs]
 """
@@ -86,6 +89,10 @@ def _pool_dicts(run_dir: Path, pattern: str) -> list:
     return out
 
 
+def _norm_title(t: str) -> str:
+    return "".join(c for c in str(t).lower() if c.isalnum())
+
+
 def _gather_run(run_dir: Path) -> dict:
     status = runstate.load_status(run_dir) or {}
     bs = _read_json(run_dir / "brainstorm.json")
@@ -95,6 +102,33 @@ def _gather_run(run_dir: Path) -> dict:
     genes = _pool_dicts(run_dir, "genes*.json")  # genes.json and any genes_<k>.json
     raw = _pool_dicts(run_dir, "ideas_raw*.json")  # one file per parallel hybridizer
     final = _pool_dicts(run_dir, "ideas.json")
+    reviews = _pool_dicts(run_dir, "reviews*.json")  # one file per parallel critic
+    credit = _read_json(run_dir / "credit_summary.json")
+    credit = credit if isinstance(credit, dict) else {}
+    annotations = _read_json(run_dir / "annotations.json")
+    annotations = annotations if isinstance(annotations, dict) else {}
+
+    # Merge adversarial reviews and human annotations onto each idea (by title).
+    rev_by_title = {_norm_title(r.get("title", "")): r for r in reviews if r.get("title")}
+    for i in final:
+        key = _norm_title(i.get("title", ""))
+        if key in rev_by_title:
+            i["review"] = rev_by_title[key]
+        ann = annotations.get(i.get("title", "")) or annotations.get(key)
+        if isinstance(ann, dict):
+            i["annotation"] = ann
+
+    # Apply the human rank override (if any) to the display order.
+    def _eff_rank(i):
+        ann = i.get("annotation") or {}
+        for cand in (ann.get("rank"), i.get("rank")):
+            try:
+                if cand not in (None, ""):
+                    return float(cand)
+            except (TypeError, ValueError):
+                pass
+        return 1e9
+    final = sorted(final, key=_eff_rank)
 
     # Key insights come from the final ideas if scored, else the raw pool.
     insight_src = final or raw
@@ -115,6 +149,8 @@ def _gather_run(run_dir: Path) -> dict:
         "raw_count": len(raw),
         "ideas": final,
         "ideas_count": len(final),
+        "reviews_count": len(reviews),
+        "credit": credit,
     }
 
 
@@ -169,13 +205,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def _route_post(self):
         path = urlparse(self.path).path
-        if path != "/api/run":
-            self._json({"error": "not found"}, 404)
+        if path == "/api/run":
+            self._post_queue()
             return
+        if path == "/api/annotate":
+            self._post_annotate()
+            return
+        self._json({"error": "not found"}, 404)
+
+    def _read_body(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length) or b"{}")
+            return json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, json.JSONDecodeError):
+            return None
+
+    def _post_queue(self):
+        body = self._read_body()
+        if body is None:
             self._json({"error": "bad request"}, 400)
             return
         meta = (body.get("meta_idea") or "").strip()
@@ -184,6 +231,38 @@ class Handler(BaseHTTPRequestHandler):
             return
         run_dir = runstate.new_run(RUNS_DIR, meta)
         self._json({"run_id": run_dir.name, "run_dir": str(run_dir)}, 201)
+
+    def _post_annotate(self):
+        """Persist a human edit (notes / score / rank) for one idea to
+        annotations.json — non-destructive: ideas.json is never overwritten."""
+        body = self._read_body()
+        if body is None:
+            self._json({"error": "bad request"}, 400)
+            return
+        d = _safe_run_dir((body.get("run_id") or "").strip())
+        title = (body.get("title") or "").strip()
+        if d is None or not title:
+            self._json({"error": "run_id and title are required"}, 400)
+            return
+        path = d / "annotations.json"
+        current = _read_json(path)
+        current = current if isinstance(current, dict) else {}
+        entry = current.get(title) if isinstance(current.get(title), dict) else {}
+        for field in ("notes", "score", "rank"):
+            if field in body:
+                val = body[field]
+                if val in (None, ""):
+                    entry.pop(field, None)
+                else:
+                    entry[field] = val
+        if entry:
+            current[title] = entry
+        else:
+            current.pop(title, None)
+        tmp = path.parent / (path.name + ".tmp")
+        tmp.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+        self._json({"ok": True, "title": title, "annotation": entry})
 
 
 _PAGE = r"""<!doctype html>
@@ -233,9 +312,30 @@ th{color:var(--mut);font-weight:600}td a{color:var(--acc);text-decoration:none}
 .idea .row{margin-top:8px;font-size:13px}.idea .lab{color:var(--mut);font-weight:600;margin-right:4px}
 .muted{color:var(--mut)}.empty{color:var(--mut);padding:30px;text-align:center}
 .pill{font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:1px 8px;color:var(--mut);margin:0 4px 4px 0;display:inline-block}
+.verdict{font-size:11px;font-weight:600;border-radius:99px;padding:1px 8px;text-transform:capitalize}
+.v-strong,.v-promising{background:rgba(67,196,107,.16);color:var(--ok)}
+.v-needs-work{background:rgba(232,179,57,.16);color:var(--run)}
+.v-weak,.v-likely-duplicate{background:rgba(229,83,75,.16);color:var(--err)}
+.rev{margin-top:8px;border-top:1px dashed var(--line);padding-top:8px;font-size:13px}
+.rev .grp{margin-top:5px}.rev .lab{color:var(--mut);font-weight:600;margin-right:4px}
+.rev ul{margin:3px 0 3px 18px;padding:0}.rev li{margin:1px 0}
+.rev .good{color:var(--ok)}.rev .bad{color:var(--err)}
+.ov{font-size:12px;color:var(--mut)}.ov b{color:var(--fg)}
+.anno{margin-top:8px;border-top:1px dashed var(--line);padding-top:8px;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.anno textarea{flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:6px;font:inherit;resize:vertical;min-height:38px}
+.anno input{width:62px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:6px}
+.anno label{font-size:11px;color:var(--mut);display:block;margin-bottom:2px}
+.anno .saved{color:var(--ok);font-size:12px;align-self:center}
+.credit{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:10px}
+.credit .cstep{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px}
+.credit .cstep .nm{font-weight:600;text-transform:capitalize;font-size:13px}
+.credit .net{font-size:18px;font-weight:700}.credit .pos{color:var(--ok)}.credit .neg{color:var(--err)}
+.credit .sub{font-size:11px;color:var(--mut)}
+.cbanner{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px}
+.tag-edit{background:rgba(110,168,254,.16);color:var(--acc);font-size:11px;border-radius:99px;padding:1px 8px;margin-left:6px}
 </style></head>
 <body>
-<header><h1>🧬 Research Idea Pipeline</h1><span class="muted" id="hint">read-only live dashboard · auto-refreshes</span></header>
+<header><h1>🧬 Research Idea Pipeline</h1><span class="muted" id="hint">live dashboard · auto-refreshes · ideas are editable</span></header>
 <div class="layout">
   <aside>
     <div class="newrun">
@@ -250,6 +350,7 @@ th{color:var(--mut);font-weight:600}td a{color:var(--acc);text-decoration:none}
 <script>
 let sel=null;
 const esc=s=>(s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const escA=s=>esc(s).replace(/"/g,"&quot;");
 async function getJSON(u,o){const r=await fetch(u,o);return r.json();}
 async function queueRun(){
   const el=document.getElementById('metaInput');const v=el.value.trim();if(!v)return;
@@ -284,19 +385,76 @@ async function refreshRun(){
      <td>${p.year||''}</td><td>${esc(p.venue)}</td><td>${p.citation_count==null?'':p.citation_count}</td></tr>`).join('')+`</table>`;}
   if(d.insights&&d.insights.length){h+=`<h2>Hybridize key insights (${d.insights.length})</h2>`+
     d.insights.map(i=>`<div class="insight"><div class="t">${esc(i.title)}</div><div class="k">${esc(i.key_insight)}</div></div>`).join('');}
-  if(d.ideas&&d.ideas.length){h+=`<h2>Ranked paper ideas (${d.ideas_count})</h2>`+
-    d.ideas.map(i=>{const sc=i.scores||{};return `<div class="idea"><div class="h">
-      <div class="rk">#${i.rank||''}</div><div class="ti">${esc(i.title)}</div>
-      <div class="score">N ${sc.novelty||'-'} · F ${sc.feasibility||'-'} · I ${sc.impact||'-'} = <b>${sc.total||'-'}</b></div></div>
-      <div class="row"><span class="lab">Hypothesis</span>${esc(i.hypothesis)}</div>
-      <div class="row"><span class="lab">Method</span>${esc(i.method_sketch)}</div>
-      ${i.key_insight?`<div class="row"><span class="lab">Insight</span>${esc(i.key_insight)}</div>`:''}
-      ${(i.parent_source_ids||[]).length?`<div class="row muted">from: ${i.parent_source_ids.map(esc).join(', ')}</div>`:''}
-     </div>`;}).join('');}
+  if(d.credit&&d.credit.per_step){h+=renderCredit(d.credit);}
+  if(d.ideas&&d.ideas.length){h+=`<h2>Ranked paper ideas (${d.ideas_count})${d.reviews_count?` · ${d.reviews_count} reviewed`:''}</h2>`+
+    d.ideas.map(i=>renderIdea(i)).join('');}
   else if(d.raw_count){h+=`<h2>Ranked paper ideas</h2><div class="muted">Generated ${d.raw_count} candidate ideas; awaiting prioritization…</div>`;}
   m.innerHTML=h;
 }
-refreshRuns();setInterval(()=>{refreshRuns();refreshRun();},2500);
+function renderCredit(c){
+  const steps=['brainstorm','retrieve','digest','hybridize','prioritize'];
+  let h=`<h2>Pipeline credit (${c.reviews_count||0} reviews)</h2>`;
+  h+=`<div class="cbanner">Weakest step: <b class="bad">${esc(c.weakest_step||'-')}</b> · Strongest: <b class="good">${esc(c.strongest_step||'-')}</b>`+
+     `${c.mean_overall_score!=null?` · mean idea score <b>${c.mean_overall_score}</b>/10`:''}`+
+     `${c.high_severity_overlaps?` · <span class="bad">${c.high_severity_overlaps} high-severity overlaps</span>`:''}</div>`;
+  h+=`<div class="credit">`+steps.map(s=>{const ps=(c.per_step||{})[s]||{};const net=ps.net||0;
+    return `<div class="cstep"><div class="nm">${s}</div>
+      <div class="net ${net>0?'pos':net<0?'neg':''}">${net>0?'+':''}${net}</div>
+      <div class="sub">+${ps.strength||0} strengths · −${ps.weakness||0} weaknesses</div></div>`;}).join('')+`</div>`;
+  return h;
+}
+function renderIdea(i){
+  const sc=i.scores||{};const a=i.annotation||{};const r=i.review;
+  const dispScore=(a.score!=null&&a.score!=='')?a.score:(sc.total||'-');
+  const dispRank=(a.rank!=null&&a.rank!=='')?a.rank:(i.rank||'');
+  const edited=(a.rank!=null&&a.rank!=='')||(a.score!=null&&a.score!=='')||(a.notes);
+  let h=`<div class="idea"><div class="h">
+    <div class="rk">#${esc(String(dispRank))}</div><div class="ti">${esc(i.title)}${edited?'<span class="tag-edit">edited</span>':''}</div>
+    <div class="score">N ${sc.novelty||'-'} · F ${sc.feasibility||'-'} · I ${sc.impact||'-'} = <b>${esc(String(dispScore))}</b></div></div>
+    <div class="row"><span class="lab">Hypothesis</span>${esc(i.hypothesis)}</div>
+    <div class="row"><span class="lab">Method</span>${esc(i.method_sketch)}</div>
+    ${i.key_insight?`<div class="row"><span class="lab">Insight</span>${esc(i.key_insight)}</div>`:''}
+    ${(i.parent_source_ids||[]).length?`<div class="row muted">from: ${i.parent_source_ids.map(esc).join(', ')}</div>`:''}`;
+  if(r){h+=renderReview(r);}
+  // Editable human annotation (notes / score / rank), persisted to annotations.json.
+  const t=escA(i.title);
+  h+=`<div class="anno" data-title="${t}">
+    <div style="flex:1;min-width:220px"><label>Your notes</label><textarea oninput="markEditing()" onblur="saveAnno(this)">${esc(a.notes||'')}</textarea></div>
+    <div><label>Score</label><input type="number" step="0.5" value="${a.score!=null?esc(String(a.score)):''}" oninput="markEditing()" onblur="saveAnno(this)" data-f="score"></div>
+    <div><label>Rank</label><input type="number" step="1" value="${a.rank!=null?esc(String(a.rank)):''}" oninput="markEditing()" onblur="saveAnno(this)" data-f="rank"></div>
+    <span class="saved" style="display:none">saved ✓</span></div>`;
+  h+=`</div>`;
+  return h;
+}
+function renderReview(r){
+  const v=esc(r.verdict||'');const vc='v-'+v.replace(/\s+/g,'-');
+  let h=`<div class="rev"><div class="grp"><span class="verdict ${vc}">${v||'reviewed'}</span>`+
+    `${r.overall_score!=null?` <span class="muted">critic score ${esc(String(r.overall_score))}/10</span>`:''}</div>`;
+  if(r.novelty_assessment)h+=`<div class="grp"><span class="lab">Novelty</span>${esc(r.novelty_assessment)}</div>`;
+  if(r.potential_impact)h+=`<div class="grp"><span class="lab">Impact</span>${esc(r.potential_impact)}</div>`;
+  if((r.strengths||[]).length)h+=`<div class="grp"><span class="lab good">Strengths</span><ul>`+r.strengths.map(s=>`<li class="good">${esc(s)}</li>`).join('')+`</ul></div>`;
+  if((r.weaknesses||[]).length)h+=`<div class="grp"><span class="lab bad">Weaknesses</span><ul>`+r.weaknesses.map(s=>`<li class="bad">${esc(s)}</li>`).join('')+`</ul></div>`;
+  if((r.overlap||[]).length)h+=`<div class="grp"><span class="lab">Overlap</span>`+r.overlap.map(o=>`<div class="ov">[${esc(o.severity||'')}] <b>${esc(o.title||o.source_id||'')}</b> — ${esc(o.relation||'')}</div>`).join('')+`</div>`;
+  if((r.step_attributions||[]).length)h+=`<div class="grp"><span class="lab">Credit</span>`+r.step_attributions.map(a=>`<div class="ov"><span class="${a.type==='strength'?'good':'bad'}">${esc(a.step||'')} ${a.type==='strength'?'+':'−'}</span> ${esc(a.note||'')}</div>`).join('')+`</div>`;
+  return h+`</div>`;
+}
+let editingUntil=0;
+function markEditing(){editingUntil=Date.now()+15000;}
+async function saveAnno(el){
+  const box=el.closest('.anno');const title=box.getAttribute('data-title');
+  const ta=box.querySelector('textarea');const sIn=box.querySelector('[data-f=score]');const rIn=box.querySelector('[data-f=rank]');
+  const payload={run_id:sel,title:title,notes:ta.value,score:sIn.value===''?null:Number(sIn.value),rank:rIn.value===''?null:Number(rIn.value)};
+  try{await getJSON('/api/annotate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const s=box.querySelector('.saved');if(s){s.style.display='inline';setTimeout(()=>{s.style.display='none';},1500);}
+  }catch(e){}
+  editingUntil=0;
+}
+function isEditing(){
+  const ae=document.activeElement;
+  if(ae&&ae.closest&&ae.closest('.anno'))return true;
+  return Date.now()<editingUntil;
+}
+refreshRuns();setInterval(()=>{refreshRuns();if(!isEditing())refreshRun();},2500);
 </script>
 </body></html>"""
 

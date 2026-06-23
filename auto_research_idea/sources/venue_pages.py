@@ -54,9 +54,31 @@ _ABSTRACT_BLOCK_RE = re.compile(
 )
 _LEADING_ABSTRACT_RE = re.compile(r"^\s*abstract\s*[:.]?\s*", re.IGNORECASE)
 
+# A detail page usually links the PDF — via a citation_pdf_url meta tag, an arXiv
+# link, or an openaccess/.pdf href. We store it so the paper can be re-fetched.
+_PDF_META_RE = re.compile(
+    r'<meta[^>]+name=["\']citation_pdf_url["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE
+)
+_PDF_HREF_RES = [
+    re.compile(r'href=["\'](https?://arxiv\.org/(?:abs|pdf)/\d{4}\.\d{4,5}[^"\']*)["\']', re.IGNORECASE),
+    re.compile(r'href=["\'](https?://[^"\']*openaccess\.thecvf\.com/[^"\']+\.pdf)["\']', re.IGNORECASE),
+    re.compile(r'href=["\'](https?://[^"\']+\.pdf)["\']', re.IGNORECASE),
+]
+
 
 def _strip_tags(html: str) -> str:
     return re.sub(r"\s+", " ", _TAG_RE.sub(" ", html)).strip()
+
+
+def _extract_pdf_url(html: str) -> str:
+    m = _PDF_META_RE.search(html)
+    if m:
+        return m.group(1).strip()
+    for rx in _PDF_HREF_RES:
+        m = rx.search(html)
+        if m:
+            return m.group(1).strip()
+    return ""
 
 
 def _extract_abstract(html: str) -> str:
@@ -94,8 +116,10 @@ def _venue_year_from_url(url: str):
 class VenuePagesSource(PaperSource):
     name = "venue_pages"
 
-    def __init__(self, extra_urls=None, recent_years: int = 2, contact_email: str = ""):
+    def __init__(self, extra_urls=None, recent_years: int = 2, contact_email: str = "",
+                 registry=None):
         self._extra_urls = list(extra_urls or [])
+        self._registry = list(registry or [])
         self._recent_years = [CURRENT_YEAR - i for i in range(max(1, recent_years))]
         self._headers = {
             "User-Agent": f"auto-research-idea ({contact_email or 'research'})",
@@ -104,7 +128,7 @@ class VenuePagesSource(PaperSource):
         # Cache the parsed (title, url) candidates per page so repeated per-query
         # calls re-filter in memory instead of refetching ~700KB pages.
         self._page_cache: dict = {}
-        # Cache per-paper abstracts (detail pages) across queries.
+        # Cache per-paper detail (abstract + pdf_url) across queries.
         self._abstract_cache: dict = {}
         self._urls = None
 
@@ -112,12 +136,28 @@ class VenuePagesSource(PaperSource):
         if self._urls is not None:
             return self._urls
         urls = list(self._extra_urls)
-        for year in self._recent_years:
-            for sub in _THECVF_ANNUAL:
-                urls.append(f"https://{sub}.thecvf.com/virtual/{year}/papers.html")
-            if year % 2 == 1:
-                for sub in _THECVF_ODD_YEARS:
+        # Config-driven registry: each entry has a `listing` template with {year}
+        # and an optional `cadence` (annual|odd|even). This is the reusable record
+        # of where each venue's official paper list lives.
+        for entry in self._registry:
+            tmpl = (entry or {}).get("listing", "")
+            if not tmpl or "{year}" not in tmpl:
+                continue
+            cadence = (entry.get("cadence") or "annual").lower()
+            for year in self._recent_years:
+                if cadence == "odd" and year % 2 == 0:
+                    continue
+                if cadence == "even" and year % 2 == 1:
+                    continue
+                urls.append(tmpl.format(year=year))
+        # Built-in default: the thecvf virtual sites (used when no registry given).
+        if not self._registry:
+            for year in self._recent_years:
+                for sub in _THECVF_ANNUAL:
                     urls.append(f"https://{sub}.thecvf.com/virtual/{year}/papers.html")
+                if year % 2 == 1:
+                    for sub in _THECVF_ODD_YEARS:
+                        urls.append(f"https://{sub}.thecvf.com/virtual/{year}/papers.html")
         # Dedup, preserve order.
         seen, out = set(), []
         for u in urls:
@@ -154,23 +194,25 @@ class VenuePagesSource(PaperSource):
         self._page_cache[url] = cands
         return cands
 
-    def _abstract_for(self, paper_url: str) -> str:
-        """Fetch a paper's detail page and extract its abstract (cached).
+    def _detail_for(self, paper_url: str) -> dict:
+        """Fetch a paper's detail page and extract {abstract, pdf_url} (cached).
 
         A short delay between detail fetches keeps a burst of them from tripping
         the venue site's rate limiter (which silently returns empty abstracts).
         Empty results are NOT cached, so a transient failure can be retried.
         """
-        if self._abstract_cache.get(paper_url):
-            return self._abstract_cache[paper_url]
-        abstract = ""
+        cached = self._abstract_cache.get(paper_url)
+        if cached and cached.get("abstract"):
+            return cached
+        detail = {"abstract": "", "pdf_url": ""}
         resp = get_with_retry(paper_url, params={}, headers=self._headers, max_attempts=3)
         if resp is not None:
-            abstract = _extract_abstract(resp.text)
-        if abstract:
-            self._abstract_cache[paper_url] = abstract
+            detail["abstract"] = _extract_abstract(resp.text)
+            detail["pdf_url"] = _extract_pdf_url(resp.text)
+        if detail["abstract"]:
+            self._abstract_cache[paper_url] = detail
         time.sleep(0.34)  # be polite to the venue site
-        return abstract
+        return detail
 
     def search(self, query: str, limit: int) -> list[Paper]:
         kw_set = set(_keywords(query))
@@ -190,13 +232,16 @@ class VenuePagesSource(PaperSource):
                 if key in seen:
                     continue
                 seen.add(key)
+                detail = self._detail_for(paper_url)
                 papers.append(
                     Paper(
                         source=self.name,
                         source_id="venue:" + re.sub(r"^https?://", "", paper_url)[:80],
                         title=title,
-                        abstract=self._abstract_for(paper_url),
+                        abstract=detail["abstract"],
                         url=paper_url,
+                        landing_url=paper_url,
+                        pdf_url=detail["pdf_url"],
                         venue=venue or "",
                         year=year,
                     )

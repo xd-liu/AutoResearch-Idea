@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-STEPS = ["brainstorm", "retrieve", "digest", "hybridize", "prioritize"]
+STEPS = ["brainstorm", "retrieve", "digest", "hybridize", "prioritize", "review"]
 STATUS_FILE = "status.json"
 REQUEST_FILE = "request.json"
 

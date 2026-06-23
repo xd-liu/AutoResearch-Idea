@@ -16,18 +16,19 @@ to a dedicated **subagent** (defined in `.claude/agents/`), and you keep the run
 `status.json` updated so the read-only web dashboard shows live progress.
 
 ```
-brainstorm ─▶ retrieve ─▶ digest ─▶ hybridize (×N parallel) ─▶ prioritize
- (opus)       (sonnet)    (sonnet)   (opus)                     (opus)
+brainstorm ─▶ retrieve ─▶ digest ─▶ hybridize (×N parallel) ─▶ prioritize ─▶ review (×N parallel)
+ (opus)       (sonnet)    (sonnet)   (opus)                     (opus)         (opus)
 ```
 
 Subagents (spawn via the Task tool with the matching `subagent_type`):
 | step | subagent_type | model | writes |
 |------|---------------|-------|--------|
 | brainstorm | `idea-brainstormer` | opus | `brainstorm.json` (10 variants + queries) |
-| retrieve | `paper-retriever` | sonnet | `papers.json` (~50 papers; runs the search tool) |
+| retrieve | `paper-retriever` | sonnet | `papers.json` (~100 papers; runs the search tool) |
 | digest | `paper-digester` | sonnet | `genes.json` (runs the digest tool) |
 | hybridize | `idea-hybridizer` | opus | `ideas_raw_<k>.json` (run several in parallel) |
 | prioritize | `idea-prioritizer` | opus | `ideas.json` (scored & ranked) |
+| review | `idea-critic` | opus | `reviews_<k>.json` (adversarial review + credit; run several in parallel) |
 
 Run everything from the project root (the dir containing `config.yaml`). Use the
 project venv (`.venv/bin/python`, fall back to `python3`).
@@ -110,20 +111,36 @@ Set `prioritize` running. Spawn `idea-prioritizer` with: `Run directory: <RUN>.
 Pool every ideas_raw*.json, dedupe, score, rank, and write <RUN>/ideas.json.`
 On return, set `prioritize` done (artifact = `ideas.json`).
 
-## 6. Wrap up
-Read `<RUN>/ideas.json`. Sanity-check the count is in the expected ~50-100 range;
-if it's far lower (or zero), the hybridizers likely collided on a filename or
-failed — check that each `ideas_raw_*.json` exists and is distinct, and re-run the
-affected step before declaring success. Then show the user the top ~10 ranked
-titles with scores, and point them at the dashboard (`http://localhost:8000`) for
-the full live view and all the ideas.
+## 6. Review (critic + overlap + credit, parallel)
+Set `review` running. Spawn **2-4 `idea-critic` subagents IN PARALLEL**, splitting
+the ranked ideas in `ideas.json` into contiguous rank slices. Give each its slice
+(e.g. "ranks 1-17") and a **distinct output filename** `reviews_<k>.json`. Each
+critic adversarially reviews its ideas — strengths/novelty/impact, defects, and
+overlap with the retrieved papers — and assigns each merit/defect to the pipeline
+step responsible. On return, aggregate the per-step credit:
+```bash
+.venv/bin/python -m auto_research_idea.credit --run-dir "$RUN"   # writes credit_summary.json
+```
+Then set `review` done (summary = the weakest/strongest step from `credit_summary.json`,
+artifact = `reviews_1.json`).
+
+## 7. Wrap up
+Read `<RUN>/ideas.json` and `<RUN>/credit_summary.json`. Sanity-check the idea count
+is in the expected ~50-100 range; if it's far lower (or zero), the hybridizers likely
+collided on a filename or failed — check that each `ideas_raw_*.json` exists and is
+distinct, and re-run the affected step before declaring success. Then show the user
+the top ~10 ranked titles with scores, call out any `likely-duplicate` verdicts and
+the **weakest pipeline step** (from the credit summary, for improving the tool), and
+point them at the dashboard (`http://localhost:8000`) for the full live view.
 
 ## Notes & tuning
-- The dashboard is **read-only** — it visualizes `status.json` and the artifacts;
-  it never runs the pipeline. The user can type a meta-idea there to **queue** a
-  run, which you pick up via `runstate pending`.
-- Scale knobs: 10 variants (brainstormer), ~50 papers (`config.yaml`
-  `retrieval.max_papers`), 50-100 ideas (number of hybridizers × ideas each).
+- The dashboard never runs the pipeline — it visualizes `status.json` and the
+  artifacts. Its only writes are **queueing** a run (type a meta-idea, pick it up
+  via `runstate pending`) and saving human **annotations** (notes / score / rank)
+  to `annotations.json` (non-destructive; `ideas.json` is never overwritten).
+- Scale knobs: 10 variants (brainstormer), ~100 papers (`config.yaml`
+  `retrieval.max_papers`), 50-100 ideas (number of hybridizers × ideas each),
+  2-4 critics (review).
 - retrieve & digest run on **Sonnet** to save cost; the creative/judgment steps
   run on **Opus**. Change a step's model in its `.claude/agents/*.md` file.
 - Keep `source_id`s intact so ideas trace back to real papers in the dashboard.
