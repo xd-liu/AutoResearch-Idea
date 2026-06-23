@@ -2,8 +2,8 @@
 
 **A literature-grounded idea engine for AI/CS research.** Give it a one-line
 research direction; get back a *ranked portfolio* of 50–100 concrete paper ideas —
-each one recombined from genes distilled out of real, freshly-retrieved papers and
-scored for novelty, feasibility, and impact.
+each one recombined from genes distilled out of real, freshly-retrieved papers,
+scored for novelty/feasibility/impact, then **adversarially reviewed**.
 
 <p align="center">
   <img alt="Python 3.8" src="https://img.shields.io/badge/python-3.8-blue.svg">
@@ -15,12 +15,12 @@ scored for novelty, feasibility, and impact.
 ```
    "diffusion models for combinatorial optimization"
                       │
-   brainstorm ─▶ retrieve ─▶ digest ─▶ hybridize (×N parallel) ─▶ prioritize
-    (opus)        (sonnet)   (sonnet)   (opus)                     (opus)
-      │             │          │          │                          │
-  10 variants    ~50 papers  "genes"   50–100 ideas             scored & ranked
-  + queries      dedup+rank  (parallel  + key insights          → ideas.json
-                              analysis)
+   brainstorm ─▶ retrieve ─▶ digest ─▶ hybridize ─▶ prioritize ─▶ critique
+    (opus)       (sonnet)   (sonnet)   (opus ×N)     (opus)        (opus ×N)
+      │            │           │          │             │             │
+  10 variants   ~100 papers  "genes"   50–100 ideas  scored &     adversarial review
+  + queries     dedup+rank   (parallel  + key         ranked       + per-step credit
+                              analysis)   insights    → ideas.json   → credit_summary.json
 ```
 
 ---
@@ -42,17 +42,20 @@ Auto Research Idea operationalizes that:
 3. **Recombine** genes across papers into candidate ideas, each with an explicit
    *key insight* and *parent genes* (full provenance — you can trace every idea
    back to the papers it came from).
-4. **Score & rank** on novelty / feasibility / impact, dedup near-twins, and
-   surface a portfolio.
+4. **Score & rank** on novelty / feasibility / impact, dedup near-twins.
+5. **Critique** each survivor adversarially — strengths, defects, overlap with the
+   retrieved literature — and attribute every flaw to the pipeline step that caused
+   it, so the *system itself* gets a feedback signal (which step is the weak link).
 
-The output isn't one "perfect" idea — it's a **ranked menu of grounded
+The output isn't one "perfect" idea — it's a **ranked, red-teamed menu of grounded
 directions** you'd never have enumerated by hand, with the receipts to vet each.
 
 ---
 
 ## ✨ What you get
 
-A ranked `ideas.json` (and a live web view of it). Each idea carries its lineage:
+A ranked `ideas.json` (and a live web view of it). Each idea carries its lineage
+*and* its critique:
 
 ```jsonc
 {
@@ -62,13 +65,17 @@ A ranked `ideas.json` (and a live web view of it). Each idea carries its lineage
   "parent_genes": ["gene from paper A", "gene from paper B"],   // provenance
   "scores": { "novelty": 8, "feasibility": 6, "impact": 7 },
   "why_it_might_work": "...",
-  "risks": "..."
+  "risks": "...",
+  "review": { "verdict": "promising-with-caveats",             // from the critic step
+              "defects": ["closest prior work is ...", "..."],
+              "overlap": "partial — differs from X in ..." }
 }
 ```
 
 Every run is **reproducible and inspectable**: all intermediate artifacts
-(variants, retrieved papers, genes, raw candidates, final ranking) are written as
-JSON under `runs/<id>/` and rendered live by the dashboard.
+(variants, retrieved papers, genes, raw candidates, ranking, reviews, credit
+summary) are written as JSON under `runs/<id>/` and rendered live by the dashboard
+— where you can also add your own notes/scores without touching the generated files.
 
 ---
 
@@ -93,8 +100,8 @@ cp .env.example .env        # optional — see "Keys" below; works without any k
 > **use the research-ideas skill on:** diffusion models for combinatorial optimization
 
 Claude Code brainstorms variants, spawns the retrieve/digest subagents, fans out
-parallel hybridizers, prioritizes, and updates the dashboard live. Final ranked
-ideas land in `runs/<id>/ideas.json` and on the page.
+parallel hybridizers, prioritizes, runs parallel critics, and updates the dashboard
+live. Final ranked ideas land in `runs/<id>/ideas.json` and on the page.
 
 *(Alternatively: type your idea into the dashboard's box to **queue** it, then tell
 Claude Code "run the queued research-ideas request".)*
@@ -119,14 +126,17 @@ unlock extras / raise rate limits, and all go in `.env` (never `.env.example`):
 | Stage | What happens | Artifact |
 |---|---|---|
 | **Brainstorm** | seed idea → 10 distinct framings + targeted search queries | `brainstorm.json` |
-| **Retrieve** | queries fan out across arXiv, OpenAlex, Semantic Scholar, GitHub awesome-lists → merge, dedup by title, rank | `papers.json` |
-| **Digest** | each paper → a structured *gene*: mechanism, assumption, failure mode | `genes.json` |
-| **Hybridize** | N Opus agents in parallel cross-breed genes → candidate ideas with key insight + provenance | `ideas_raw_*.json` |
+| **Retrieve** | queries fan out across 8 sources → merge, dedup by title, rank (~100 papers) | `papers.json` |
+| **Digest** | each paper → a structured *gene*: mechanism, assumption, failure mode | `genes_<k>.json` |
+| **Hybridize** | N Opus agents in parallel cross-breed genes → candidates with key insight + provenance | `ideas_raw_<k>.json` |
 | **Prioritize** | score (novelty/feasibility/impact), dedup near-duplicates, rank | `ideas.json` |
+| **Critique** | N Opus critics adversarially review each idea + assign per-step credit/blame | `reviews_<k>.json` |
+| **Credit** | aggregate the reviews → which pipeline step is the weak link | `credit_summary.json` |
 
 Because each stage is a file, you can **stop, inspect, edit, and resume** — e.g.
-hand-curate `genes.json` before hybridizing, or re-run prioritization with
-different weights.
+hand-curate `genes_<k>.json` before hybridizing, or re-run prioritization with
+different weights. The dashboard also writes a non-destructive `annotations.json`
+for your own notes/score/rank overrides — `ideas.json` is never overwritten.
 
 ---
 
@@ -136,31 +146,47 @@ The interesting bit isn't just the output — it's the orchestration pattern:
 
 **Skill/subagent = brain; Python = hands.** Open-ended creative + judgment work is
 delegated to LLM subagents; deterministic, parallel, mechanical work (retrieval,
-dedup, ranking) is plain Python. Each side does what it's good at.
+dedup, ranking, credit aggregation) is plain Python. Each side does what it's good at.
 
 - **Orchestrator** — Claude Code running the `research-ideas` skill
   (`.claude/skills/research-ideas/`). Delegates each step to a subagent and tracks
   progress in `runs/<id>/status.json`.
 - **One subagent per step** (`.claude/agents/*.md`) — independently promptable and
   swappable, with **task-based model routing**: cheap mechanical steps run on
-  **Sonnet**, open-ended creative steps on **Opus**.
+  **Sonnet**, open-ended creative/judgment steps on **Opus**.
 
   | Step | Agent (model) | Writes | Role |
   |---|---|---|---|
   | 1 | `idea-brainstormer` (opus) | `brainstorm.json` | 10 idea variants + search queries |
-  | 2 | `paper-retriever` (sonnet) | `papers.json` | drives `search` tool → ~50 deduped, ranked papers |
-  | 3 | `paper-digester` (sonnet) | `genes.json` | distills each paper into a reusable gene |
-  | 4 | `idea-hybridizer` (opus, ×N) | `ideas_raw_*.json` | recombines genes → 50–100 candidates |
+  | 2 | `paper-retriever` (sonnet) | `papers.json` | drives `search` tool → ~100 deduped, ranked papers |
+  | 3 | `paper-digester` (sonnet) | `genes_<k>.json` | distills each paper into a reusable gene |
+  | 4 | `idea-hybridizer` (opus, ×N) | `ideas_raw_<k>.json` | recombines genes → 50–100 candidates |
   | 5 | `idea-prioritizer` (opus) | `ideas.json` | scores, dedups, ranks |
+  | 6 | `idea-critic` (opus, ×N) | `reviews_<k>.json` | adversarial review + per-step credit assignment |
+
+  Then `credit.py` (pure Python, no key) pools the reviews into `credit_summary.json`
+  — a feedback signal for which step to improve next.
 
 - **Multi-source retrieval** (`auto_research_idea/sources/`) — pluggable
-  `PaperSource` backends (arXiv, OpenAlex, Semantic Scholar, GitHub awesome-lists,
-  venue pages, PDF extraction) fanned out in parallel with backoff; a registry
-  merges results by normalized title, enriching each paper from every source that
-  found it. Sources **fail soft** — a dead backend returns `[]`, never crashes the run.
-- **Dashboard** (`dashboard.py`, stdlib only) — read-only; polls the run artifacts
-  and renders variants, papers, genes, and the ranked ideas live. It never runs
-  the pipeline, so it can't corrupt a run.
+  `PaperSource` backends fanned out in parallel with backoff; a registry merges
+  results by normalized title, enriching each paper from every source that found
+  it. Eight sources ship today:
+
+  | Source | Covers |
+  |---|---|
+  | `arxiv` | arXiv preprints |
+  | `openalex` | broad cross-venue index + citation counts |
+  | `semantic_scholar` | abstracts + citations (key optional) |
+  | `github` | `awesome-<topic>` reading lists |
+  | `venue_pages` | official accepted-paper listings (CVF, NeurIPS, …) |
+  | `openreview` | ICLR / NeurIPS / etc. on OpenReview |
+  | `acl_anthology` | ACL / EMNLP / NAACL (+ Findings) |
+  | `ecva` | ECCV open-access proceedings |
+
+  Sources **fail soft** — a dead backend returns `[]`, never crashes the run.
+- **Dashboard** (`dashboard.py`, stdlib only) — renders variants, papers, genes,
+  ranked ideas, reviews, and the credit summary live. It never runs the pipeline,
+  so it can't corrupt a run; the only thing it writes is your `annotations.json`.
 
 The whole thing coordinates through one contract: **JSON files in `runs/<id>/`.**
 Orchestrator, subagents, and dashboard share nothing else — which is what makes
@@ -170,20 +196,22 @@ runs reproducible and every stage independently hackable.
 
 ## ⚙️ Configuration
 
-`config.yaml` tunes the **tools**: paper sources, retrieval limits
-(`retrieval.max_papers` ≈ 50), and the digest model/effort. Orchestration knobs
-(10 variants, number of parallel hybridizers → 50–100 ideas) live in the skill and
-agent files.
+`config.yaml` tunes the **tools**: which of the 8 paper sources are enabled (+ the
+per-venue `venue_pages` / `openreview` / `acl_anthology` / `ecva` registries),
+retrieval limits (`retrieval.max_papers` ≈ 100, `enrich_abstracts`, `parse_pdf`),
+and the digest model/effort. Orchestration knobs (10 variants, number of parallel
+hybridizers → 50–100 ideas, number of critics) live in the skill and agent files.
 
 ---
 
 ## 🛠️ Running the Python tools directly (debugging)
 
-The retrieval path needs no key — exercise it standalone:
+The retrieval and credit paths need no key — exercise them standalone:
 
 ```bash
 .venv/bin/python -m auto_research_idea.search --queries "graph neural network CO" --out papers.json
 .venv/bin/python -m auto_research_idea.digest --papers papers.json --out genes.json   # needs ANTHROPIC_API_KEY
+.venv/bin/python -m auto_research_idea.credit --run-dir runs/<id>                      # aggregate reviews, no key
 ```
 
 ---
@@ -195,35 +223,37 @@ The retrieval path needs no key — exercise it standalone:
   skills/research-ideas/SKILL.md     # orchestrator
   agents/                            # one subagent per step
     idea-brainstormer.md  paper-retriever.md  paper-digester.md
-    idea-hybridizer.md    idea-prioritizer.md
+    idea-hybridizer.md    idea-prioritizer.md  idea-critic.md
 auto_research_idea/
   search.py        # tool: queries -> papers.json (search + dedup + rank)
   digest.py        # tool: papers.json -> genes.json (parallel analysis)
-  dashboard.py     # read-only live web dashboard (stdlib only)
+  credit.py        # tool: reviews_*.json -> credit_summary.json (pure aggregation)
+  dashboard.py     # live web dashboard + non-destructive annotations (stdlib only)
   runstate.py      # run-dir status contract (orchestrator <-> dashboard)
   llm.py models.py config.py
-  sources/         # arxiv, openalex, semantic_scholar, github_awesome,
-                   #   venue_pages, pdf_extract, _http (backoff), registry
+  sources/         # arxiv, openalex, semantic_scholar, github_awesome, venue_pages,
+                   #   openreview, acl_anthology, ecva, pdf_extract, _http, registry
 config.yaml  requirements.txt
 runs/<id>/         # per-run artifacts (created at runtime; git-ignored)
 ```
 
 **Extend it:** add a paper source by subclassing `PaperSource` in `sources/`
-(must never raise — return `[]` on failure). Re-prompt a step by editing its
-`.claude/agents/*.md`. Change the run-dir contract in `runstate.py` (the dashboard
-reads the same shapes).
+(must never raise — return `[]` on failure) and listing it under `sources:` in
+`config.yaml`. Re-prompt a step by editing its `.claude/agents/*.md`. Change the
+run-dir contract in `runstate.py` (the dashboard reads the same shapes).
 
 ---
 
 ## ⚠️ Honest limitations
 
 - **Idea quality is bounded by retrieval.** A thin or off-target paper set yields
-  thin ideas — tune queries / `max_papers` for unfamiliar areas.
-- **Scores are LLM judgments, not ground truth.** Treat novelty/feasibility/impact
-  as a triage signal to skim 100 ideas down to 10, not as a verdict.
+  thin ideas — tune queries / `max_papers` / sources for unfamiliar areas.
+- **Scores and reviews are LLM judgments, not ground truth.** Treat
+  novelty/feasibility/impact and the critic's verdicts as a triage signal to skim
+  100 ideas down to 10, not as a verdict.
 - **Novelty ≠ correctness.** A high-scoring idea can still be subtly known or
-  flawed; the provenance is there so *you* can verify, fast. This is a tool for
-  augmenting researcher ideation, not replacing the literature review.
+  flawed; the critique + provenance are there so *you* can verify, fast. This is a
+  tool for augmenting researcher ideation, not replacing the literature review.
 
 ---
 
@@ -237,4 +267,4 @@ reads the same shapes).
 
 ---
 
-<p align="center"><i>Novelty is recombination at scale. This just does the bookkeeping.</i></p>
+<p align="center"><i>Novelty is recombination at scale. This just does the bookkeeping — and red-teams the result.</i></p>
